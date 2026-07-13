@@ -1,6 +1,6 @@
 import tensorflow as tf
 import tensorflow_hub as hub
-from tensorflow_docs.vis import embed   #REMOVE (for gif)
+from tensorflow_docs.vis import embed   #REMOVE later (for gifs)
 import numpy as np
 import cv2
 
@@ -11,14 +11,14 @@ import os
 from threading import Thread
 from queue import Queue
 
-# Import matplotlib libraries         REMOVE
+# Import matplotlib libraries   
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 import matplotlib.patches as patches
 
-# Some modules to display an animation using imageio.  REMOVE
+# Some modules to display an animation using imageio.  REMOVE later
 import imageio
 from IPython.display import HTML, display
 
@@ -105,7 +105,7 @@ def _keypoints_and_edges_for_display(keypoints_with_scores,
     keypoints_all.append(kpts_above_thresh_absolute)
 
 
-    for edge_pair, color in KEYPOINT_EDGE_INDS_TO_COLOR.items():         #REMOVE
+    for edge_pair, color in KEYPOINT_EDGE_INDS_TO_COLOR.items():         #REMOVE later
       if (kpts_scores[edge_pair[0]] > keypoint_threshold and
           kpts_scores[edge_pair[1]] > keypoint_threshold):
         x_start = kpts_absolute_xy[edge_pair[0], 0]
@@ -128,9 +128,9 @@ def _keypoints_and_edges_for_display(keypoints_with_scores,
   return keypoints_xy, edges_xy, edge_colors
 
 
-def draw_prediction_on_image(
+def draw_prediction_on_image(  
     image, keypoints_with_scores, crop_region=None, close_figure=False,
-    output_image_height=None):
+    output_image_height=None):   #REMOVE later
   """Draws the keypoint predictions on image.
 
   Args:
@@ -321,7 +321,7 @@ else:
     return keypoints_with_scores
 
 
-def camera_feed():
+def camera_feed_detect():
   plt.ion()
   fig, ax = plt.subplots()
   cap = cv2.VideoCapture(0)
@@ -363,10 +363,9 @@ def camera_feed():
     plt.pause(0.001)
     end_time = time.time()
     print(f"Whole image making time: {end_time - start_time:.4f} seconds")
-
   cap.release()
 
-def saved_image(file_name):   #for testing
+def saved_image_detect(file_name):   #for testing
   # Load the input image.
   image_path = file_name
   image = tf.io.read_file(image_path)
@@ -393,7 +392,7 @@ def saved_image(file_name):   #for testing
 
 
 
-
+# for video detect, define functions for each thread
 def video_controller(image_q, file_name):
   #open video and get framerate
   cap = cv2.VideoCapture(file_name)
@@ -413,12 +412,10 @@ def video_controller(image_q, file_name):
       ret, frame = cap.read()
       if not ret:
         break
-
       if frame_idx >= next_frame_to_save:
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image_q.put(frame)
         next_frame_to_save += frame_interval
-
       frame_idx += 1
     except KeyboardInterrupt:
       break
@@ -434,7 +431,6 @@ def pose_detection_controller(image_q, display_q):
       # Run model inference.
       keypoints_with_scores = movenet(input_image)
       
-
       display_image = tf.expand_dims(image, axis=0)
       display_image = tf.cast(tf.image.resize_with_pad(display_image, 1280, 1280), dtype=tf.int32)
       output_overlay = draw_prediction_on_image(np.squeeze(display_image.numpy(), axis=0), keypoints_with_scores)
@@ -460,6 +456,7 @@ def display_controller(display_q, img_display, fig):
 
 
 
+#starts other threads and handles display
 def main_func(video_file_name):
   #placeholder image 
   image_path = 'video_image.jpg'
@@ -504,4 +501,6 @@ def main_func(video_file_name):
   #display_thread.join()
 
 
+
+#what to do with all this code (change depending on what you want to do)
 main_func('green_cropped.mp4')
