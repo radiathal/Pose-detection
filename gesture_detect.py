@@ -8,8 +8,6 @@ import cv2
 import urllib.request
 import time
 import os
-from threading import Thread
-from queue import Queue
 
 # Import matplotlib libraries   
 from matplotlib import pyplot as plt
@@ -22,8 +20,6 @@ import matplotlib.patches as patches
 import imageio
 from IPython.display import HTML, display
 
-
-target_fps = 4
 
 # Dictionary that maps from joint names to keypoint indices.
 KEYPOINT_DICT = {
@@ -223,7 +219,7 @@ def progress(value, max=100):  #REMOVE
 
 
 
-#STARTING TO DO SOMETHING
+#IMPORT MODEL
 model_name = "movenet_lightning"
 os.environ['TFHUB_CACHE_DIR'] = os.path.expanduser('~/tfhub_cache')
 
@@ -308,6 +304,10 @@ else:
     """
     model = module.signatures['serving_default']
 
+    
+    # Resize and pad the image to keep the aspect ratio and fit the expected size.
+    input_image = tf.expand_dims(input_image, axis=0)
+    input_image = tf.image.resize_with_pad(input_image, input_size, input_size)
     # SavedModel format expects tensor type of int32.
     input_image = tf.cast(input_image, dtype=tf.int32)
     # Run model inference.
@@ -342,11 +342,8 @@ def camera_feed_detect():
     image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     image = tf.convert_to_tensor(image, dtype=tf.uint8)
 
-    # Resize and pad the image to keep the aspect ratio and fit the expected size.
-    input_image = tf.expand_dims(image, axis=0)
-    input_image = tf.image.resize_with_pad(input_image, input_size, input_size)
     # Run model inference.
-    keypoints_with_scores = movenet(input_image)
+    keypoints_with_scores = movenet(image)
 
     print("visualising..")
     # Visualize the predictions with image.
@@ -365,18 +362,14 @@ def camera_feed_detect():
     print(f"Whole image making time: {end_time - start_time:.4f} seconds")
   cap.release()
 
-def saved_image_detect(file_name):   #for testing
+def image_detect(file_name):   #for testing
   # Load the input image.
   image_path = file_name
   image = tf.io.read_file(image_path)
   image = tf.image.decode_jpeg(image)
 
-  # Resize and pad the image to keep the aspect ratio and fit the expected size.
-  input_image = tf.expand_dims(image, axis=0)
-  input_image = tf.image.resize_with_pad(input_image, input_size, input_size)
-
   # Run model inference.
-  keypoints_with_scores = movenet(input_image)
+  keypoints_with_scores = movenet(image)
 
   # Visualize the predictions with image.
   display_image = tf.expand_dims(image, axis=0)
@@ -390,117 +383,5 @@ def saved_image_detect(file_name):   #for testing
   _ = plt.axis('off')
   plt.show()
 
-
-
-# for video detect, define functions for each thread
-def video_controller(image_q, file_name):
-  #open video and get framerate
-  cap = cv2.VideoCapture(file_name)
-  if not cap.isOpened():
-        raise IOError(f"Cannot open video: {file_name}")
-  video_fps = cap.get(cv2.CAP_PROP_FPS)
-  if video_fps <= 0:
-    raise ValueError("Could not read video FPS")
-
-  frame_interval = video_fps / target_fps
-
-  next_frame_to_save = 0.0
-  frame_idx = 0
-
-  while True:
-    try:
-      ret, frame = cap.read()
-      if not ret:
-        break
-      if frame_idx >= next_frame_to_save:
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        image_q.put(frame)
-        next_frame_to_save += frame_interval
-      frame_idx += 1
-    except KeyboardInterrupt:
-      break
-
-def pose_detection_controller(image_q, display_q):
-  while True:
-    try:
-      image = image_q.get()
-      print(f"[{time.time()}]: image recieved")
-      # Resize and pad the image to keep the aspect ratio and fit the expected size.
-      input_image = tf.expand_dims(image, axis=0)
-      input_image = tf.image.resize_with_pad(input_image, input_size, input_size)
-      # Run model inference.
-      keypoints_with_scores = movenet(input_image)
-      
-      display_image = tf.expand_dims(image, axis=0)
-      display_image = tf.cast(tf.image.resize_with_pad(display_image, 1280, 1280), dtype=tf.int32)
-      output_overlay = draw_prediction_on_image(np.squeeze(display_image.numpy(), axis=0), keypoints_with_scores)
-
-      display_q.put(output_overlay)
-    except KeyboardInterrupt:
-      break
-
-def display_controller(display_q, img_display, fig):
-  while True:
-    try:
-      #run when you get processed image
-      output_overlay = display_q.get()
-      print(f"[{time.time()}]: start display")
-
-      img_display.set_data(output_overlay)   # update instead of creating new imshow
-      fig.canvas.draw()
-      fig.canvas.flush_events()
-      plt.pause(0.001)
-    except KeyboardInterrupt:
-      break
-
-
-
-
-#starts other threads and handles display
-def main_func(video_file_name):
-  #placeholder image 
-  image_path = 'video_image.jpg'
-  image = tf.io.read_file(image_path)
-  image = tf.image.decode_jpeg(image)
-  #setup display stuff
-  plt.ion()
-  fig, ax = plt.subplots()
-  img_display = ax.imshow(image)
-
-  #make queues
-  display_q = Queue()
-  image_q = Queue()
-  
-  #init threads for different processes
-  video_thread   = Thread(target=video_controller, args=(image_q, video_file_name,))
-  pose_thread    = Thread(target=pose_detection_controller, args=(image_q, display_q,))
-  #display_thread = Thread(target=display_controller, args=(display_q, img_display, fig,))
-  
-  #start threads
-  video_thread.start()
-  pose_thread.start()
-  #display_thread.start()
-
-  while True:
-    try:
-      #run when you get processed image
-      output_overlay = display_q.get()
-      print(f"[{time.time()}]: start display")
-
-      img_display.set_data(output_overlay)   # update instead of creating new imshow
-      fig.canvas.draw()
-      fig.canvas.flush_events()
-      plt.pause(0.001)
-    except KeyboardInterrupt:
-      print("STOOOOOOOOOOPPPPPPP")
-      break
-
-  #wait for KeyboardInterrupt to end threads
-  video_thread.join()
-  pose_thread.join()
-  #display_thread.join()
-
-
-
-#what to do with all this code (change depending on what you want to do)
-main_func('green_cropped.mp4')
+if __name__ == "__main__":
+  image_detect("images/example_image.jpg")
