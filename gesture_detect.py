@@ -1,6 +1,6 @@
 import tensorflow as tf
 import tensorflow_hub as hub
-from tensorflow_docs.vis import embed   #REMOVE later (for gifs)
+#from tensorflow_docs.vis import embed   #REMOVE later (for gifs)
 import numpy as np
 import cv2
 
@@ -16,9 +16,9 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 import matplotlib.patches as patches
 
-# Some modules to display an animation using imageio.  REMOVE later
-import imageio
-from IPython.display import HTML, display
+# Some modules to display an animation using imageio. 
+#import imageio
+#from IPython.display import HTML, display
 
 
 # Dictionary that maps from joint names to keypoint indices.

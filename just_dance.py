@@ -1,26 +1,15 @@
 import tensorflow as tf
-import tensorflow_hub as hub
-from tensorflow_docs.vis import embed   #REMOVE later (for gifs)
 import numpy as np
 import cv2
 
 #my adds
-import urllib.request
 import time
 import os
 
 # Import matplotlib libraries   
 from matplotlib import pyplot as plt
-from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-import matplotlib.patches as patches
 
-# Some modules to display an animation using imageio.  REMOVE later
-import imageio
-from IPython.display import HTML, display
-
-#
 from threading import Thread
 from threading import Event
 from queue import Queue
