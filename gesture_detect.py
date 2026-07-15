@@ -321,17 +321,11 @@ else:
     return keypoints_with_scores
 
 
-def camera_feed_detect():
-  plt.ion()
-  fig, ax = plt.subplots()
+def camera_feed_detect(times):
   cap = cv2.VideoCapture(0)
 
-  ret, frame = cap.read()
-  frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-  img_display = ax.imshow(frame)
-
-  for i in range(20):
-    #take thi image
+  for i in range(times):
+    #take the image
     start_time = time.time()
     ret, frame = cap.read()
 
@@ -339,8 +333,7 @@ def camera_feed_detect():
       print("Error: Could not read frame.")
       continue
 
-    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    image = tf.convert_to_tensor(image, dtype=tf.uint8)
+    image = tf.convert_to_tensor(frame, dtype=tf.uint8)
 
     # Run model inference.
     keypoints_with_scores = movenet(image)
@@ -353,20 +346,17 @@ def camera_feed_detect():
     output_overlay = draw_prediction_on_image(
       np.squeeze(display_image.numpy(), axis=0), keypoints_with_scores)
 
-  
-    img_display.set_data(output_overlay)   # update instead of creating new imshow
-    fig.canvas.draw()
-    fig.canvas.flush_events()
-    plt.pause(0.001)
+    #display image
+    cv2.imshow("Camera feed", output_overlay)
+    cv2.waitKey(1)
+
     end_time = time.time()
     print(f"Whole image making time: {end_time - start_time:.4f} seconds")
   cap.release()
 
-def image_detect(file_name):   #for testing
+def image_detect(file_path):   #for testing
   # Load the input image.
-  image_path = file_name
-  image = tf.io.read_file(image_path)
-  image = tf.image.decode_jpeg(image)
+  image = cv2.imread(file_path)
 
   # Run model inference.
   keypoints_with_scores = movenet(image)
@@ -378,10 +368,9 @@ def image_detect(file_name):   #for testing
   output_overlay = draw_prediction_on_image(
       np.squeeze(display_image.numpy(), axis=0), keypoints_with_scores)
 
-  plt.figure(figsize=(5, 5))
-  plt.imshow(output_overlay)
-  _ = plt.axis('off')
-  plt.show()
+  #display image
+  cv2.imshow("image", output_overlay)
+  cv2.waitKey(0)
 
 if __name__ == "__main__":
-  image_detect("images/example_image.jpg")
+  camera_feed_detect(50)

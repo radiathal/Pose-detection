@@ -44,7 +44,6 @@ def video_controller(image_q, file_name, birth_t):
         ret, frame = cap.read()
         if not ret:
           break
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image_q.put(frame)
         next_frame_to_save += frame_interval
         #print(f"[{time.time()-birth_t:.4f}]: {i} taken image")
@@ -73,34 +72,11 @@ def pose_detection_controller(image_q, display_q, birth_t):
     except KeyboardInterrupt:
       break
 
-#NOT USED, display is handled by main_func
-"""def display_controller(display_q, img_display, fig):
-  while not stop_event.is_set():
-    try:
-      #run when you get processed image
-      output_overlay = display_q.get()
-      print(f"[{time.time()}]: start display")
-
-      img_display.set_data(output_overlay)   # update instead of creating new imshow
-      fig.canvas.draw()
-      fig.canvas.flush_events()
-      plt.pause(0.001)
-    except KeyboardInterrupt:
-      break"""
-
 
 #starts other threads and handles display
 def main_func(video_file_name):
   birth_t = time.time()
   print((f"[{time.time()-birth_t:.4f}]: START"))
-  #placeholder image 
-  image_path = 'images/empty.jpg'
-  image = tf.io.read_file(image_path)
-  image = tf.image.decode_jpeg(image)
-  #setup display stuff
-  plt.ion()
-  fig, ax = plt.subplots()
-  img_display = ax.imshow(image)
 
   #make queues
   display_q = Queue()
@@ -121,19 +97,17 @@ def main_func(video_file_name):
       #run when you get processed image
       output_overlay = display_q.get()
       print(f"[{time.time()-birth_t:.4f}]: {i} displaying image...")
-
-      img_display.set_data(output_overlay)   # update instead of creating new imshow
-      fig.canvas.draw()
-      fig.canvas.flush_events()
-      plt.pause(0.001)
+      cv2.imshow("Just Dance", output_overlay)
       print(f"[{time.time()-birth_t:.4f}]: {i} displayed image")
+      cv2.waitKey(1)
       i+=1
     except KeyboardInterrupt:
       stop_event.set()
+      cv2.destroyAllWindows()
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
       break
 
 
 
 if __name__ == "__main__":
-  main_func('videos/cropped_follow.mp4')
+  main_func('videos/cbto_follow.mp4')
