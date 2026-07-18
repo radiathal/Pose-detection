@@ -15,7 +15,8 @@ from queue import Queue
 import gesture_detect
 
 
-target_fps = 4
+target_fps = 30
+sleep_time = (1/target_fps)/5
 stop_event = Event()
 birth_t=0
 
@@ -60,11 +61,9 @@ def pose_detection_controller(image_q, display_q, birth_t):
       print(f"[{time.time()-birth_t:.4f}]: {i} detecting image...")
       
       # Run model inference.
-      keypoints_with_scores = gesture_detect.movenet(image)
-      
-      display_image = tf.expand_dims(image, axis=0)
-      display_image = tf.cast(tf.image.resize_with_pad(display_image, 1280, 1280), dtype=tf.int32)
-      output_overlay = gesture_detect.draw_prediction_on_image(np.squeeze(display_image.numpy(), axis=0), keypoints_with_scores)
+      landmarks = gesture_detect.detect_pose(image,i)
+
+      output_overlay = gesture_detect.draw_landmarks(image, landmarks)
 
       display_q.put(output_overlay)
       print(f"[{time.time()-birth_t:.4f}]: {i} detected image")
@@ -85,22 +84,26 @@ def main_func(video_file_name):
   #init threads for different processes
   video_thread   = Thread(target=video_controller, args=(image_q, video_file_name, birth_t,))
   pose_thread    = Thread(target=pose_detection_controller, args=(image_q, display_q, birth_t,))
-  #display_thread = Thread(target=display_controller, args=(display_q, img_display, fig,))
   
   #start threads
   video_thread.start()
   pose_thread.start()
-  #display_thread.start()
+
   i=0
+  last_t = time.perf_counter()
   while True:
     try:
       #run when you get processed image
       output_overlay = display_q.get()
+      print(f"[{time.time()-birth_t:.4f}]: {i} got image.")
+      while time.perf_counter()-last_t < 1/target_fps:
+        time.sleep((1/target_fps)-(time.perf_counter()-last_t))   #sleep for frame interval - elapsed time from last frame
       print(f"[{time.time()-birth_t:.4f}]: {i} displaying image...")
       cv2.imshow("Just Dance", output_overlay)
       print(f"[{time.time()-birth_t:.4f}]: {i} displayed image")
       cv2.waitKey(1)
       i+=1
+      last_t = time.perf_counter()
     except KeyboardInterrupt:
       stop_event.set()
       cv2.destroyAllWindows()
@@ -110,4 +113,4 @@ def main_func(video_file_name):
 
 
 if __name__ == "__main__":
-  main_func('videos/cbto_follow.mp4')
+  main_func('videos/test_video1_quality.mp4')
