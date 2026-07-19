@@ -27,11 +27,7 @@ options = PoseLandmarkerOptions(
 detector = PoseLandmarker.create_from_options(options)
 
 
-# Skeleton points to draw
-POSE_POINTS = [
-    0, 11, 12, 13, 14, 15, 16, 17, 18, 23, 24, 25, 26, 27, 28
-]
-POINT_COL = (255,255,0)
+
 # Skeleton connections for drawing
 POSE_CONNECTIONS = [
     (11,13),(13,15),(15,17),
@@ -42,7 +38,103 @@ POSE_CONNECTIONS = [
     (23,25),(25,27),
     (24,26),(26,28)
 ]
+
+POINT_COL = (255,255,0)
 CONNECTION_COL = (255,120,0)
+
+#map out points and angles to names
+point_dict = {
+        "head"       : 0,
+        "shoulder_l" : 11,
+        "shoulder_r" : 12,
+        "elbow_l" : 13,
+        "elbow_r" : 14,
+        "wrist_l" : 15,
+        "wrist_r" : 16,
+        "hand_l"  : 17,
+        "hand_r"  : 18,
+        "hip_l"   : 23,
+        "hip_r"   : 24,
+        "knee_l"  : 25,
+        "knee_r"  : 26,
+        "ankle_l" : 27,
+        "ankle_r" : 28
+    }
+angle_dict = {
+        "shoulder_l" : (13, 11, 12),
+        "shoulder_r" : (14, 12, 11),
+        "elbow_l" : (15, 13, 11),
+        "elbow_r" : (16, 14, 12),
+        "hip_l"   : (25, 23, 24),
+        "hip_r"   : (26, 24, 23),
+        "knee_l"  : (27, 25, 23),
+        "knee_r"  : (28, 26, 24),
+        #"wrist_l" : (17, 15, 13),
+        #"wrist_r" : (18, 16, 14)
+    }
+
+
+###############################################
+
+class PoseProfile:
+  def __init__(self):
+    self.points   = []
+    self.l_points = []
+    self.point_vels = []
+
+    self.angles   = []
+    self.l_angles = []
+    self.angle_vels = []
+    
+
+  def update(self, landmarks):
+    self.l_points = self.points.copy()
+    self.points.clear()
+    #get new points
+    for point in point_dict.values():
+      self.points.append([landmarks[point].x, landmarks[point].y])
+
+    self.l_angles = self.angles.copy()
+    self.angles.clear()
+    #get new angles
+    for angle in angle_dict.values():
+      #coordinates of points
+      a = np.array((landmarks[angle[0]].x, landmarks[angle[0]].y))
+      b = np.array((landmarks[angle[1]].x, landmarks[angle[1]].y))
+      c = np.array((landmarks[angle[2]].x, landmarks[angle[2]].y))
+      # "b becomes origin"
+      ba = a - b
+      bc = c - b
+      #get angles ba and bc
+      angle_a = np.arctan2(ba[1], [ba[0]]) #takes in y, x
+      angle_c = np.arctan2(bc[1], [bc[0]]) 
+      self.angles.append(angle_c - angle_a)
+
+    #get changes in angles and point positions
+    try:
+      self.angle_vels = np.array(self.angles) - np.array(self.l_angles)
+      self.point_vels = np.array(self.points) - np.array(self.l_points)
+    except ValueError: #means that l_angles/l_points havent been yet set up
+      self.angle_vels = self.angles.copy()
+      self.point_vels = self.points.copy() 
+
+  def print_profile(self):
+    i = 0
+    print("POINTS:")
+    for key in point_dict.keys():
+      print(f"{key}: {self.points[i]}, speed: {self.point_vels[i]}")
+      i += 1
+    print("ANGLES:")
+    i = 0
+    for key in angle_dict.keys():
+      print(f"{key}: {self.angles[i]}, speed: {self.angle_vels[i]}")
+      i += 1
+
+def compare_pose_profiles(p1, p2, accuracy):
+  pass
+
+
+#################################################
 
 
 ##FUNCTIONS FOR POSE DETECTION AND DISPLAYING DRAWN SKELETON
@@ -66,7 +158,7 @@ def draw_landmarks(image, landmarks):
 
   h, w, _ = image.shape
 
-  for p in POSE_POINTS:
+  for p in point_dict.values():
     lm = landmarks[p]
     x, y = int(lm.x * w), int(lm.y * h)
     cv2.circle(image, (x, y), 4, POINT_COL, -1)
@@ -77,8 +169,10 @@ def draw_landmarks(image, landmarks):
   return image
 
 
+  ########################################
 
 
+  #TESTING
 def camera_feed_detect():
   cap = cv2.VideoCapture(0)
   frame_id = 0
@@ -149,6 +243,9 @@ def image_detect(file_path):   #for testing
         if cv2.waitKey(0) & 0xFF == ord('q'):
           cv2.destroyAllWindows()
 
+
+
+#testing
 if __name__ == "__main__":
   camera_feed_detect()
   #image_detect("images/example_image.jpg")
