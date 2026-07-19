@@ -59,28 +59,25 @@ def video_controller(image_q, file_name, birth_t):
 
 def camera_controller(image_q, birth_t):
   cap = cv2.VideoCapture(0)
-  wait_t = 1/target_fps
-  start_t      = time.perf_counter()
-  last_image_t = time.perf_counter()
+  interval = 1.0/target_fps
+  
+  next_t = time.perf_counter()
 
   while cap.isOpened() and not stop_event.is_set():
-    if time.perf_counter() - last_image_t < wait_t:
-      # sleep for time between frames - elapsed time from last frame - pic taking delay
-      sleep_t = wait_t - (time.perf_counter() - last_image_t) - (last_image_t - start_t)
-      if sleep_t < 0:
-        sleep_t = 0
-      time.sleep(sleep_t) 
-    start_t = time.perf_counter()
-    #print(f"[{time.time()-birth_t:.4f}]:  taking image...")
-    #take the image
-    ret, frame = cap.read()
-    image_q.put(frame)
-    last_image_t = time.perf_counter()
-    #print(f"[{time.time()-birth_t:.4f}]:  taken image") 
+    cap.grab()
+    now_t = time.perf_counter()
+    if now_t >= next_t:
+      #print(f"[{time.time()-birth_t:.4f}]:  taking image...")
+      ret, frame = cap.read()
+      if not ret:
+        print("Error: Could not read frame.")
+        break
+      image_q.put(frame)
+      next_t += interval
+      #print(f"[{time.time()-birth_t:.4f}]:  taken image") 
 
-    if not ret:
-      print("Error: Could not read frame.")
-      continue
+
+    
 
   cap.release()
 
