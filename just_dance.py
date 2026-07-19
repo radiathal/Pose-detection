@@ -48,7 +48,6 @@ def video_controller(image_q, file_name, birth_t):
         #print(f"[{time.time()-birth_t:.4f}]: {i} taking image...")
         ret, frame = cap.retrieve()
         if not ret:
-          image_q.put("STOP")
           break
         image_q.put(frame)
         next_frame_to_save += frame_interval
@@ -58,27 +57,56 @@ def video_controller(image_q, file_name, birth_t):
     except KeyboardInterrupt:
       break
 
+def camera_controller(image_q, birth_t):
+  cap = cv2.VideoCapture(0)
+  wait_t = 1/target_fps
+  start_t      = time.perf_counter()
+  last_image_t = time.perf_counter()
 
-def pose_detection_controller(image_q, display_q, birth_t):
+  while cap.isOpened() and not stop_event.is_set():
+    if time.perf_counter() - last_image_t < wait_t:
+      # sleep for time between frames - elapsed time from last frame - pic taking delay
+      sleep_t = wait_t - (time.perf_counter() - last_image_t) - (last_image_t - start_t)
+      if sleep_t < 0:
+        sleep_t = 0
+      time.sleep(sleep_t) 
+    start_t = time.perf_counter()
+    #print(f"[{time.time()-birth_t:.4f}]:  taking image...")
+    #take the image
+    ret, frame = cap.read()
+    image_q.put(frame)
+    last_image_t = time.perf_counter()
+    #print(f"[{time.time()-birth_t:.4f}]:  taken image") 
+
+    if not ret:
+      print("Error: Could not read frame.")
+      continue
+
+  cap.release()
+
+def pose_detection_controller(vimage_q, cimage_q, display_q, birth_t):
   i = 0
-  pose_prof = gesture_detect.PoseProfile()
+  vpose_prof = gesture_detect.PoseProfile()
+  cpose_prof = gesture_detect.PoseProfile()
 
   while not stop_event.is_set():
     try:
-      image = image_q.get()
-      if type(image) == str:
-        break
+      vimage = vimage_q.get()
+      cimage = cimage_q.get()
       #print(f"[{time.time()-birth_t:.4f}]: {i} detecting image...")
       
-      # Run model inference.
-      landmarks = gesture_detect.detect_pose(image,i)
+      # Run model inference. use 0 for video and 1 for camera detection (different gesture detection instances)
+      landmarks = gesture_detect.detect_pose(vimage,i,0) 
       if landmarks:
-        pose_prof.update(landmarks)
-        #pose_prof.print_profile()
+        vpose_prof.update(landmarks)
+      voutput_overlay = gesture_detect.draw_landmarks(vimage, landmarks)
 
-      output_overlay = gesture_detect.draw_landmarks(image, landmarks)
+      landmarks = gesture_detect.detect_pose(cimage,i,1) 
+      if landmarks:
+        vpose_prof.update(landmarks)
+      coutput_overlay = gesture_detect.draw_landmarks(cimage, landmarks)
 
-      display_q.put(output_overlay)
+      display_q.put([voutput_overlay, coutput_overlay])
       #print(f"[{time.time()-birth_t:.4f}]: {i} detected image")
       i+=1
     except KeyboardInterrupt:
@@ -94,14 +122,17 @@ def main_func(video_file_name):
 
   #make queues
   display_q = Queue()
-  image_q = Queue()
+  vimage_q = Queue()
+  cimage_q = Queue()
   
   #init threads for different processes
-  video_thread   = Thread(target=video_controller, args=(image_q, video_file_name, birth_t,))
-  pose_thread    = Thread(target=pose_detection_controller, args=(image_q, display_q, birth_t,))
+  video_thread   = Thread(target=video_controller, args=(vimage_q, video_file_name, birth_t,))
+  camera_thread  = Thread(target=camera_controller, args=(cimage_q,birth_t,)) 
+  pose_thread    = Thread(target=pose_detection_controller, args=(vimage_q, cimage_q, display_q, birth_t,))
   
   #start threads
   video_thread.start()
+  camera_thread.start()
   pose_thread.start()
 
   i=0
@@ -109,7 +140,7 @@ def main_func(video_file_name):
   while True:
     try:
       #wait for processed image
-      output_overlay = display_q.get()
+      [voutput_overlay, coutput_overlay] = display_q.get()
       #print(f"[{time.time()-birth_t:.4f}]: {i} got image.")
 
       #run display at correct framerate
@@ -123,7 +154,8 @@ def main_func(video_file_name):
       start_disp = time.perf_counter()
 
       #display
-      cv2.imshow("Just Dance", output_overlay)
+      cv2.imshow("Just Dance", voutput_overlay)
+      cv2.imshow("Camera feed", coutput_overlay)
 
       #print(f"[{time.time()-birth_t:.4f}]: {i} displayed image")
       cv2.waitKey(1)
@@ -138,6 +170,9 @@ def main_func(video_file_name):
       cv2.destroyAllWindows()
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
       break
+  camera_thread.join()
+  video_thread.join()
+  pose_thread.join()
 
 
 

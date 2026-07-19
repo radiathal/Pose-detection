@@ -24,7 +24,7 @@ options = PoseLandmarkerOptions(
     min_tracking_confidence=0.5
 )
 
-detector = PoseLandmarker.create_from_options(options)
+detectors = [PoseLandmarker.create_from_options(options), PoseLandmarker.create_from_options(options)]
 
 
 
@@ -138,13 +138,13 @@ def compare_pose_profiles(p1, p2, accuracy):
 
 
 ##FUNCTIONS FOR POSE DETECTION AND DISPLAYING DRAWN SKELETON
-def detect_pose(image, frame_id):
+def detect_pose(image, frame_id, detector_ind = 0):
    # Convert to RGB for Mediapipe
    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
    # detect
-   results = detector.detect_for_video(mp_image, frame_id)
+   results = detectors[detector_ind].detect_for_video(mp_image, frame_id)
 
    if results.pose_landmarks:
      landmarks = results.pose_landmarks[0]
