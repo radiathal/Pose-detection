@@ -15,7 +15,7 @@ from queue import Queue
 import gesture_detect
 
 
-target_fps = 25
+target_fps = 20
 stop_event = Event()
 birth_t=0
 
@@ -57,6 +57,7 @@ def video_controller(image_q, file_name, birth_t):
     except KeyboardInterrupt:
       break
 
+
 def camera_controller(image_q, birth_t):
   cap = cv2.VideoCapture(0)
   interval = 1.0/target_fps
@@ -64,22 +65,19 @@ def camera_controller(image_q, birth_t):
   next_t = time.perf_counter()
 
   while cap.isOpened() and not stop_event.is_set():
-    cap.grab()
     now_t = time.perf_counter()
+    cap.grab()
     if now_t >= next_t:
-      #print(f"[{time.time()-birth_t:.4f}]:  taking image...")
+      print(f"[{time.time()-birth_t:.4f}]:  taking image...")
       ret, frame = cap.read()
       if not ret:
         print("Error: Could not read frame.")
         break
       image_q.put(frame)
       next_t += interval
-      #print(f"[{time.time()-birth_t:.4f}]:  taken image") 
-
-
-    
-
+      print(f"[{time.time()-birth_t:.4f}]:  taken image") 
   cap.release()
+
 
 def pose_detection_controller(vimage_q, cimage_q, display_q, birth_t):
   i = 0
@@ -90,7 +88,7 @@ def pose_detection_controller(vimage_q, cimage_q, display_q, birth_t):
     try:
       vimage = vimage_q.get()
       cimage = cimage_q.get()
-      #print(f"[{time.time()-birth_t:.4f}]: {i} detecting image...")
+      print(f"[{time.time()-birth_t:.4f}]: {i} detecting image...")
       
       # Run model inference. use 0 for video and 1 for camera detection (different gesture detection instances)
       landmarks = gesture_detect.detect_pose(vimage,i,0) 
@@ -104,7 +102,7 @@ def pose_detection_controller(vimage_q, cimage_q, display_q, birth_t):
       coutput_overlay = gesture_detect.draw_landmarks(cimage, landmarks)
 
       display_q.put([voutput_overlay, coutput_overlay])
-      #print(f"[{time.time()-birth_t:.4f}]: {i} detected image")
+      print(f"[{time.time()-birth_t:.4f}]: {i} detected image")
       i+=1
     except KeyboardInterrupt:
       break
@@ -122,19 +120,24 @@ def main_func(video_file_name):
   vimage_q = Queue()
   cimage_q = Queue()
   
-  #init threads for different processes
+  #process the just dance video before starting
+  print("Loading...")
   video_thread   = Thread(target=video_controller, args=(vimage_q, video_file_name, birth_t,))
+  video_thread.start()
+  video_thread.join()
+  print("Ready!")
+  
+  #init threads for different processes
   camera_thread  = Thread(target=camera_controller, args=(cimage_q,birth_t,)) 
   pose_thread    = Thread(target=pose_detection_controller, args=(vimage_q, cimage_q, display_q, birth_t,))
   
   #start threads
-  video_thread.start()
   camera_thread.start()
   pose_thread.start()
 
   i=0
   last_t = time.perf_counter()
-  while True:
+  while not stop_event.is_set():
     try:
       #wait for processed image
       [voutput_overlay, coutput_overlay] = display_q.get()
@@ -168,7 +171,7 @@ def main_func(video_file_name):
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
       break
   camera_thread.join()
-  video_thread.join()
+  #video_thread.join()
   pose_thread.join()
 
 
