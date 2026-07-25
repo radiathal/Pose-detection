@@ -15,7 +15,7 @@ from queue import Queue
 import gesture_detect
 
 
-target_fps = 10
+target_fps = 20
 stop_event = Event()
 start_event = Event()
 birth_t=0
@@ -67,8 +67,7 @@ def camera_controller(image_q, birth_t):
   interval = 1.0/target_fps
   next_t = time.perf_counter()
 
-  while cap.isOpened() and not stop_event.is_set() and start_event.is_set():
-    
+  while cap.isOpened() and not stop_event.is_set() and start_event.is_set():  
     s = time.perf_counter()
     cap.grab()
     print(f"GRAB TIME = {time.perf_counter()-s:.4f}")
@@ -99,7 +98,7 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
         display_q.put("STOP")
         break
 
-      print(f"[{time.time()-birth_t:.4f}]: {i} detecting image...")
+      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
       
       # Run model inference. (detector index for different gesture detection instances)
       landmarks = gesture_detect.detect_pose(image,i,detector_index) 
@@ -110,7 +109,7 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
       output_overlay = gesture_detect.draw_landmarks(image, landmarks)
       #print(f"[{time.time()-birth_t:.4f}]: {i} drawn image")
 
-      print(f"[{time.time()-birth_t:.4f}]: {i} detected image")
+      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
 
       display_q.put(output_overlay)
       
@@ -166,11 +165,11 @@ def main_func(video_file_name):
       #print(f"[{time.time()-birth_t:.4f}]: {i} got image.")
 
       #run display at correct framerate
-      while time.perf_counter()-last_t < 1/target_fps:
-        delay_time = (1/target_fps)-(time.perf_counter()-last_t)-display_delay
-        if delay_time < 0:
-          delay_time = 0
-        time.sleep(delay_time)   #sleep for frame interval - elapsed time from last frame - displaying delay
+      #while time.perf_counter()-last_t < 1/target_fps:
+        #delay_time = (1/target_fps)-(time.perf_counter()-last_t)-display_delay
+        #if delay_time < 0:
+          #delay_time = 0
+        #time.sleep(delay_time)   #sleep for frame interval - elapsed time from last frame - displaying delay
 
       print(f"[{time.time()-birth_t:.4f}]: {i} displaying image...")
       start_disp = time.perf_counter()
@@ -190,6 +189,7 @@ def main_func(video_file_name):
 
     except KeyboardInterrupt:
       stop_event.set()
+      start_event.clear()
       cv2.destroyAllWindows()
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
       break
