@@ -2,6 +2,10 @@ import tensorflow as tf
 import numpy as np
 import cv2
 
+# audio 
+import av
+import sounddevice as sd
+
 import time
 import os
 
@@ -9,9 +13,8 @@ import os
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 
-from threading import Thread
-from threading import Event
-from queue import Queue
+from threading import Thread, Event, Lock
+from queue import Queue, Empty
 import gesture_detect
 
 
@@ -21,44 +24,47 @@ start_event = Event()
 birth_t=0
 
 
+  
 
 # for video detect, define functions for each thread
-def video_controller(image_q, file_name, birth_t):
-  #open video and get framerate
-  cap = cv2.VideoCapture(file_name)
-  if not cap.isOpened():
-        raise IOError(f"Cannot open video: {file_name}")
-  video_fps = cap.get(cv2.CAP_PROP_FPS)
-  if video_fps <= 0:
-    raise ValueError("Could not read video FPS")
-  print(video_fps)
+def video_controller(image_q, audio_q, container, video_stream, audio_stream, resampler, file_name, birth_t):
+  #only save select video frames according to target fps
+  video_fps = float(video_stream.average_rate)
   frame_interval = video_fps / target_fps
   print(frame_interval)
-
   frame = None
-
   next_frame_to_save = 0.0
   frame_idx = 0
   i=0
-  while not stop_event.is_set():
+
+
+  for packet in container.demux(video_stream, audio_stream):
     try:
-      ret = cap.grab()
-      if not ret:
-        break
-      if frame_idx >= next_frame_to_save:
-        #print(f"[{time.time()-birth_t:.4f}]: {i} taking image...")
-        ret, frame = cap.retrieve()
-        if not ret:
-          break
-        image_q.put(frame)
-        next_frame_to_save += frame_interval
-        #print(f"[{time.time()-birth_t:.4f}]: {i} taken image")
-        i += 1
-      frame_idx += 1
+      if packet.stream.type == "audio":
+        for frame in packet.decode():
+          for resampled in resampler.resample(frame):
+            data = bytes(resampled.planes[0])
+            audio_q.put(data)
+      elif packet.stream.type == "video":
+        for frame in packet.decode():
+          if frame_idx >= next_frame_to_save:
+            #print(f"[{time.time()-birth_t:.4f}]: {i} unpacking frame...")
+            img = frame.to_ndarray(format="bgr24") 
+            ts = float(frame.pts * video_stream.time_base)
+            image_q.put((ts, img))
+
+            next_frame_to_save += frame_interval
+            #print(f"[{time.time()-birth_t:.4f}]: {i} unpacked frame.")
+            i += 1
+            
+          frame_idx += 1
+      if stop_event.is_set():
+        break   
     except KeyboardInterrupt:
       break
   #signals that it is the end
   image_q.put("STOP")
+  container.close()
   
 
 
@@ -70,18 +76,18 @@ def camera_controller(image_q, birth_t):
   while cap.isOpened() and not stop_event.is_set() and start_event.is_set():  
     s = time.perf_counter()
     cap.grab()
-    print(f"GRAB TIME = {time.perf_counter()-s:.4f}")
+    #print(f"GRAB TIME = {time.perf_counter()-s:.4f}")
     now_t = time.perf_counter()
     if now_t >= next_t:
       while next_t <= now_t:
         next_t += interval
-      print(f"[{time.time()-birth_t:.4f}]:  taking image...")
+      #print(f"[{time.time()-birth_t:.4f}]:  taking image...")
       ret, frame = cap.retrieve()
       if not ret:
         print("Error: Could not read frame.")
         break
       image_q.put(frame)
-      print(f"[{time.time()-birth_t:.4f}]:  taken image") 
+     # print(f"[{time.time()-birth_t:.4f}]:  taken image") 
   cap.release()
 
 
@@ -91,27 +97,33 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
     time.sleep(0.0001)
   while not stop_event.is_set():
     try:
-      image = image_q.get()
+      if detector_index == 0:
+        data = image_q.get()
+        ts = data[0]
+        image = data[1]
+      else:
+        image = image_q.get()
 
       #if it's the end of the video, send STOP
       if type(image) == str:
         display_q.put("STOP")
         break
 
-      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
+      #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
       
       # Run model inference. (detector index for different gesture detection instances)
       landmarks = gesture_detect.detect_pose(image,i,detector_index) 
       if landmarks:
         pose_prof.update(landmarks)
 
-      #print(f"[{time.time()-birth_t:.4f}]: {i} drawing image...")
       output_overlay = gesture_detect.draw_landmarks(image, landmarks)
-      #print(f"[{time.time()-birth_t:.4f}]: {i} drawn image")
 
-      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
+      #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
 
-      display_q.put(output_overlay)
+      if detector_index == 0:
+        display_q.put((ts, output_overlay))
+      else:
+        display_q.put(output_overlay)
       
       i+=1
     except KeyboardInterrupt:
@@ -130,38 +142,82 @@ def main_func(video_file_name):
   cdisplay_q = Queue()
   vimage_q = Queue()
   cimage_q = Queue()
+  audio_q  = Queue()
 
   vpose_prof = gesture_detect.PoseProfile()
   cpose_prof = gesture_detect.PoseProfile()
   
+  # for audio unpacking from file
+  container = av.open(video_file_name)
+  video_stream = container.streams.video[0]
+  audio_stream = container.streams.audio[0]
+
+  sample_rate = audio_stream.rate
+  channels    = audio_stream.channels
+
+  resampler = av.AudioResampler(format='s16', layout=audio_stream.layout, rate=sample_rate)
+
+
+  def audio_callback(outdata, frames, time_info, status):
+    needed = len(outdata)
+    buf = bytearray()
+    while len(buf) < needed:
+      try:
+        chunk = audio_q.get_nowait()
+        buf += chunk
+      except Empty:
+        buf += b'\x00' * (needed-len(buf)) #add silence if no data to add
+        break
+    outdata[:] = bytes(buf[:needed])
+    # stash any leftover back for next callback
+    if len(buf) > needed:
+      leftover = bytes(buf[needed:])
+      # put leftover back at front of queye
+      audio_q.queue.appendleft(leftover) if hasattr(audio_q.queue, 'appendleft') else audio_q.put(leftover)
+
   #process the just dance video before starting
   print("Loading...")
-  video_thread   = Thread(target=video_controller, args=(vimage_q, video_file_name, birth_t,))
-  video_thread.start()
-  video_thread.join()
+
+  #init audio stream
+  stream = sd.RawOutputStream(
+    samplerate=sample_rate,
+    channels=channels,
+    dtype='int16',
+    callback=audio_callback,
+    blocksize=1024,
+  )
+
   print("Ready!")
   
   #init threads for different processes
   camera_thread  = Thread(target=camera_controller, args=(cimage_q,birth_t,)) 
   vpose_thread   = Thread(target=pose_detection_controller, args=(vimage_q, vdisplay_q, vpose_prof, 0, birth_t,))
   cpose_thread   = Thread(target=pose_detection_controller, args=(cimage_q, cdisplay_q, cpose_prof, 1, birth_t,))
+  video_thread   = Thread(target=video_controller, args=(vimage_q, audio_q, container, video_stream, audio_stream, resampler, video_file_name, birth_t,))
   
   #start threads
+  video_thread.start()
   camera_thread.start()
   vpose_thread.start()
   cpose_thread.start()
 
   i=0
-  last_t = time.perf_counter()
+  #last_t = time.perf_counter()
   start_event.set()
+  stream.start()
+  start_time = time.perf_counter()
+  print(stream.active)
+  
   while not stop_event.is_set():
     try:
       #wait for processed image
-      voutput_overlay = vdisplay_q.get()
-      coutput_overlay = cdisplay_q.get()
+      ts, voutput_overlay = vdisplay_q.get()
+      coutput_overlay     = cdisplay_q.get()
       if type(voutput_overlay) == str:
         stop_event.set()
         break
+      while time.perf_counter() - start_time < ts:
+        time.sleep(0.001)
       #print(f"[{time.time()-birth_t:.4f}]: {i} got image.")
 
       #run display at correct framerate
@@ -171,30 +227,37 @@ def main_func(video_file_name):
           #delay_time = 0
         #time.sleep(delay_time)   #sleep for frame interval - elapsed time from last frame - displaying delay
 
-      print(f"[{time.time()-birth_t:.4f}]: {i} displaying image...")
-      start_disp = time.perf_counter()
+      while time.perf_counter() - start_time < ts:
+        time.sleep(0.001)
+
+      #print(f"[{time.time()-birth_t:.4f}]: {i} displaying image...")
+      #start_disp = time.perf_counter()
 
       #display
       cv2.imshow("Just Dance", voutput_overlay)
-      print(f"[{time.time()-birth_t:.4f}]: {i} displayed v image")
+      #print(f"[{time.time()-birth_t:.4f}]: {i} displayed v image")
 
       cv2.imshow("Camera feed", coutput_overlay)
-      print(f"[{time.time()-birth_t:.4f}]: {i} displayed c image")
+      #print(f"[{time.time()-birth_t:.4f}]: {i} displayed c image")
       cv2.waitKey(1)
       i+=1
 
       #some timing stuff...
-      display_delay = time.perf_counter() - start_disp  # how long it took to display image
-      last_t = time.perf_counter()
+      #display_delay = time.perf_counter() - start_disp  # how long it took to display image
+      #last_t = time.perf_counter()
 
     except KeyboardInterrupt:
       stop_event.set()
+      time.sleep(0.05)
+      stream.stop()
+      stream.close()
+      container.close()
       start_event.clear()
       cv2.destroyAllWindows()
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
       break
   camera_thread.join()
-  #video_thread.join()
+  video_thread.join()
   cpose_thread.join()
   vpose_thread.join()
 
