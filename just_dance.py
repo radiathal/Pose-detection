@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 
 from threading import Thread, Event, Lock
+from collections import deque
 from queue import Queue, Empty
 import gesture_detect
 
@@ -23,13 +24,58 @@ stop_event = Event()
 start_event = Event()
 birth_t=0
 
+class Streamer():
+  def audio_callback(self, outdata, frames, time_info, status):
+    needed = len(outdata)
+    buf = bytearray()
+    with self.audio_lock:
+      while len(buf) < needed and self.audio_buf:
+        buf += self.audio_buf.popleft()
+      if len(buf) < needed:
+        buf += b'\x00' * (needed-len(buf)) #add silence if no data to add
+      elif len(buf) > needed:
+        leftover = bytes(buf[needed:])
+        self.audio_buf.appendleft(leftover)
+        buf = buf[:needed]
+    outdata[:] = bytes(buf)
 
+  def __init__(self, video_file_name):
+    self.container = av.open(video_file_name)
+    self.video_stream = self.container.streams.video[0]
+    self.audio_stream = self.container.streams.audio[0]
+
+    self.sample_rate = self.audio_stream.rate
+    self.channels    = self.audio_stream.channels
+
+    self.resampler = av.AudioResampler(format='s16', layout=self.audio_stream.layout, rate=self.sample_rate)
+
+    self.audio_lock = Lock()
+    self.audio_buf = deque()
+
+    #init audio stream
+    self.stream = sd.RawOutputStream(
+      samplerate=self.sample_rate,
+      channels=self.channels,
+      dtype='int16',
+      callback=self.audio_callback,
+      blocksize=2048,
+      latency="high",
+    )
+
+  def close(self):
+    self.stream.stop()
+    self.stream.close()
+    self.container.close()
+    
+
+
+    
   
 
 # for video detect, define functions for each thread
-def video_controller(image_q, audio_q, container, video_stream, audio_stream, resampler, file_name, birth_t):
+def video_controller(image_q, streamer, birth_t):
   #only save select video frames according to target fps
-  video_fps = float(video_stream.average_rate)
+  video_fps = float(streamer.video_stream.average_rate)
   frame_interval = video_fps / target_fps
   print(frame_interval)
   frame = None
@@ -38,33 +84,36 @@ def video_controller(image_q, audio_q, container, video_stream, audio_stream, re
   i=0
 
 
-  for packet in container.demux(video_stream, audio_stream):
+  for packet in streamer.container.demux(streamer.video_stream, streamer.audio_stream):
     try:
+
       if packet.stream.type == "audio":
         for frame in packet.decode():
-          for resampled in resampler.resample(frame):
+          for resampled in streamer.resampler.resample(frame):
             data = bytes(resampled.planes[0])
-            audio_q.put(data)
+            with streamer.audio_lock:
+              streamer.audio_buf.append(data)
+
       elif packet.stream.type == "video":
         for frame in packet.decode():
           if frame_idx >= next_frame_to_save:
             #print(f"[{time.time()-birth_t:.4f}]: {i} unpacking frame...")
             img = frame.to_ndarray(format="bgr24") 
-            ts = float(frame.pts * video_stream.time_base)
+            ts = float(frame.pts * streamer.video_stream.time_base)
             image_q.put((ts, img))
 
             next_frame_to_save += frame_interval
             #print(f"[{time.time()-birth_t:.4f}]: {i} unpacked frame.")
             i += 1
-            
           frame_idx += 1
+
       if stop_event.is_set():
         break   
     except KeyboardInterrupt:
       break
   #signals that it is the end
-  image_q.put("STOP")
-  container.close()
+  image_q.put(("STOP", "STOP"))
+  streamer.container.close()
   
 
 
@@ -148,52 +197,15 @@ def main_func(video_file_name):
   cpose_prof = gesture_detect.PoseProfile()
   
   # for audio unpacking from file
-  container = av.open(video_file_name)
-  video_stream = container.streams.video[0]
-  audio_stream = container.streams.audio[0]
-
-  sample_rate = audio_stream.rate
-  channels    = audio_stream.channels
-
-  resampler = av.AudioResampler(format='s16', layout=audio_stream.layout, rate=sample_rate)
-
-
-  def audio_callback(outdata, frames, time_info, status):
-    needed = len(outdata)
-    buf = bytearray()
-    while len(buf) < needed:
-      try:
-        chunk = audio_q.get_nowait()
-        buf += chunk
-      except Empty:
-        buf += b'\x00' * (needed-len(buf)) #add silence if no data to add
-        break
-    outdata[:] = bytes(buf[:needed])
-    # stash any leftover back for next callback
-    if len(buf) > needed:
-      leftover = bytes(buf[needed:])
-      # put leftover back at front of queye
-      audio_q.queue.appendleft(leftover) if hasattr(audio_q.queue, 'appendleft') else audio_q.put(leftover)
-
-  #process the just dance video before starting
+  streamer = Streamer(video_file_name)
+ 
   print("Loading...")
-
-  #init audio stream
-  stream = sd.RawOutputStream(
-    samplerate=sample_rate,
-    channels=channels,
-    dtype='int16',
-    callback=audio_callback,
-    blocksize=1024,
-  )
-
-  print("Ready!")
   
   #init threads for different processes
   camera_thread  = Thread(target=camera_controller, args=(cimage_q,birth_t,)) 
   vpose_thread   = Thread(target=pose_detection_controller, args=(vimage_q, vdisplay_q, vpose_prof, 0, birth_t,))
   cpose_thread   = Thread(target=pose_detection_controller, args=(cimage_q, cdisplay_q, cpose_prof, 1, birth_t,))
-  video_thread   = Thread(target=video_controller, args=(vimage_q, audio_q, container, video_stream, audio_stream, resampler, video_file_name, birth_t,))
+  video_thread   = Thread(target=video_controller, args=(vimage_q, streamer, birth_t,))
   
   #start threads
   video_thread.start()
@@ -201,12 +213,14 @@ def main_func(video_file_name):
   vpose_thread.start()
   cpose_thread.start()
 
+
+  print("Ready!")
+
   i=0
   #last_t = time.perf_counter()
   start_event.set()
-  stream.start()
+  streamer.stream.start()
   start_time = time.perf_counter()
-  print(stream.active)
   
   while not stop_event.is_set():
     try:
@@ -249,9 +263,7 @@ def main_func(video_file_name):
     except KeyboardInterrupt:
       stop_event.set()
       time.sleep(0.05)
-      stream.stop()
-      stream.close()
-      container.close()
+      streamer.close()
       start_event.clear()
       cv2.destroyAllWindows()
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
