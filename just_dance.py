@@ -19,10 +19,12 @@ from queue import Queue, Empty
 import gesture_detect
 
 
-target_fps = 20
+target_fps = 15
 stop_event = Event()
 start_event = Event()
 birth_t=0
+
+
 
 class Streamer():
   def audio_callback(self, outdata, frames, time_info, status):
@@ -33,10 +35,12 @@ class Streamer():
         buf += self.audio_buf.popleft()
       if len(buf) < needed:
         buf += b'\x00' * (needed-len(buf)) #add silence if no data to add
+        print("silence")
       elif len(buf) > needed:
         leftover = bytes(buf[needed:])
         self.audio_buf.appendleft(leftover)
         buf = buf[:needed]
+        print("over")
     outdata[:] = bytes(buf)
 
   def __init__(self, video_file_name):
@@ -51,6 +55,7 @@ class Streamer():
 
     self.audio_lock = Lock()
     self.audio_buf = deque()
+
 
     #init audio stream
     self.stream = sd.RawOutputStream(
@@ -90,7 +95,9 @@ def video_controller(image_q, streamer, birth_t):
       if packet.stream.type == "audio":
         for frame in packet.decode():
           for resampled in streamer.resampler.resample(frame):
-            data = bytes(resampled.planes[0])
+            #data = bytes(resampled.planes[0])
+            n_bytes = resampled.samples * len(resampled.layout.channels) * 2  # 2 = bytes per sample for s16
+            data = bytes(resampled.planes[0])[:n_bytes]
             with streamer.audio_lock:
               streamer.audio_buf.append(data)
 
@@ -108,9 +115,10 @@ def video_controller(image_q, streamer, birth_t):
           frame_idx += 1
 
       if stop_event.is_set():
-        break   
+        break
     except KeyboardInterrupt:
       break
+      
   #signals that it is the end
   image_q.put(("STOP", "STOP"))
   streamer.container.close()
@@ -128,7 +136,7 @@ def camera_controller(image_q, birth_t):
     #print(f"GRAB TIME = {time.perf_counter()-s:.4f}")
     now_t = time.perf_counter()
     if now_t >= next_t:
-      while next_t <= now_t:
+      while now_t >= next_t:
         next_t += interval
       #print(f"[{time.time()-birth_t:.4f}]:  taking image...")
       ret, frame = cap.retrieve()
@@ -155,7 +163,7 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
 
       #if it's the end of the video, send STOP
       if type(image) == str:
-        display_q.put("STOP")
+        display_q.put(("STOP", "STOP"))
         break
 
       #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
@@ -217,48 +225,47 @@ def main_func(video_file_name):
   print("Ready!")
 
   i=0
+  lag=0
   #last_t = time.perf_counter()
-  start_event.set()
-  streamer.stream.start()
   start_time = time.perf_counter()
+  start_event.set()
   
   while not stop_event.is_set():
     try:
       #wait for processed image
+
       ts, voutput_overlay = vdisplay_q.get()
+      print(f"[{time.perf_counter()-start_time:.4f}]: {ts} got voutput")
       coutput_overlay     = cdisplay_q.get()
+      print(f"[{time.perf_counter()-start_time:.4f}]: {ts} got coutput")
+
+      if not streamer.stream.active:
+        start_time = time.perf_counter()
+        streamer.stream.start()
+      
+      
       if type(voutput_overlay) == str:
         stop_event.set()
         break
-      while time.perf_counter() - start_time < ts:
-        time.sleep(0.001)
-      #print(f"[{time.time()-birth_t:.4f}]: {i} got image.")
+      print(f"[{time.perf_counter()-start_time:.4f}]: {ts} got image.")
 
-      #run display at correct framerate
-      #while time.perf_counter()-last_t < 1/target_fps:
-        #delay_time = (1/target_fps)-(time.perf_counter()-last_t)-display_delay
-        #if delay_time < 0:
-          #delay_time = 0
-        #time.sleep(delay_time)   #sleep for frame interval - elapsed time from last frame - displaying delay
+      #if display is late skip the frame
+      if not time.perf_counter() - start_time - ts > 1/target_fps: 
+        #wait until timestamp
+        while time.perf_counter() - start_time < ts - lag:
+          time.sleep(0.001)
 
-      while time.perf_counter() - start_time < ts:
-        time.sleep(0.001)
+        print(f"[{time.perf_counter()-start_time:.4f}]: {ts} displaying image...")
+        lag_s = time.perf_counter()
+      
+        #display
+        cv2.imshow("Just Dance", voutput_overlay)
 
-      #print(f"[{time.time()-birth_t:.4f}]: {i} displaying image...")
-      #start_disp = time.perf_counter()
-
-      #display
-      cv2.imshow("Just Dance", voutput_overlay)
-      #print(f"[{time.time()-birth_t:.4f}]: {i} displayed v image")
-
-      cv2.imshow("Camera feed", coutput_overlay)
-      #print(f"[{time.time()-birth_t:.4f}]: {i} displayed c image")
-      cv2.waitKey(1)
+        cv2.imshow("Camera feed", coutput_overlay)
+        print(f"[{time.perf_counter()-start_time:.4f}]: {ts} displayed c image")
+        cv2.waitKey(1)
+        lag = time.perf_counter() - lag_s
       i+=1
-
-      #some timing stuff...
-      #display_delay = time.perf_counter() - start_disp  # how long it took to display image
-      #last_t = time.perf_counter()
 
     except KeyboardInterrupt:
       stop_event.set()
@@ -269,11 +276,15 @@ def main_func(video_file_name):
       print((f"[{time.time()-birth_t:.4f}]: STOP"))
       break
   camera_thread.join()
+  print("cam joined")
   video_thread.join()
+  print("video joined")
   cpose_thread.join()
+  print("cpose joined")
   vpose_thread.join()
+  print("vpose_joined")
 
 
 
 if __name__ == "__main__":
-  main_func('videos/test_video1_quality.mp4')
+  main_func('videos/dsmn.mp4')
