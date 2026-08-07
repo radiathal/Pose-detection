@@ -153,7 +153,7 @@ def camera_controller(image_q, birth_t):
   cap.release()
 
 
-def pose_detection_controller(image_q, display_q, pose_prof, detector_index, birth_t):
+def pose_detection_controller(image_q, display_q, rating_q, detector_index, birth_t):
   i = 0
   while not start_event.is_set():
     time.sleep(0.0001)
@@ -171,18 +171,21 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
       #if it's the end of the video, send STOP
       if type(image) == str:
         display_q.put(("STOP", "STOP"))
+        rating_q.put(None)
         break
 
-      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
+      #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
       
       # Run model inference. (detector index for different gesture detection instances)
       landmarks = gesture_detect.detect_pose(image,i,detector_index) 
       if landmarks:
-        pose_prof.update(landmarks)
+        rating_q.put(landmarks)
+      else: 
+        rating_q.put(None)
 
       output_overlay = gesture_detect.draw_landmarks(image, landmarks)
 
-      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
+      #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
 
       if detector_index == 0:
         display_q.put((ts, output_overlay))
@@ -193,6 +196,36 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
       image_q.task_done()
       
       i+=1
+    except KeyboardInterrupt:
+      break
+
+def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
+  #show accuracy one frame later
+  accuracy_q.put(0)
+
+  vpose_prof = gesture_detect.PoseProfile()
+  cpose_prof = gesture_detect.PoseProfile()
+  i = 0
+  while not start_event.is_set():
+    time.sleep(0.0001)
+  while not stop_event.is_set():
+    try:
+      vlandmarks = vrating_q.get()
+      clandmarks = crating_q.get()
+      if vlandmarks != None and clandmarks != None:
+        print((f"[{time.time()-birth_t:.4f}]: {i} accs..."))
+        vpose_prof.update(vlandmarks)
+        cpose_prof.update(clandmarks)
+
+        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, 0.5)
+
+        accuracy_q.put(accuracies)
+        print((f"[{time.time()-birth_t:.4f}]: {i} accs done"))
+      else:
+        print("No LANDMARKS")
+        accuracy_q.put(None)
+      i += 1
+
     except KeyboardInterrupt:
       break
 
@@ -210,29 +243,30 @@ def main_func(video_file_name):
   vimage_q = Queue()
   cimage_q = Queue()
   audio_q  = Queue()
+  vrating_q = Queue()
+  crating_q = Queue()
+  accuracy_q = Queue()
 
-  vpose_prof = gesture_detect.PoseProfile()
-  cpose_prof = gesture_detect.PoseProfile()
+  
   
   # for audio unpacking from file
   streamer = Streamer(video_file_name)
- 
-  print("Loading...")
+
   
   #init threads for different processes
   camera_thread  = Thread(target=camera_controller, args=(cimage_q,birth_t,)) 
-  vpose_thread   = Thread(target=pose_detection_controller, args=(vimage_q, vdisplay_q, vpose_prof, 0, birth_t,))
-  cpose_thread   = Thread(target=pose_detection_controller, args=(cimage_q, cdisplay_q, cpose_prof, 1, birth_t,))
+  vpose_thread   = Thread(target=pose_detection_controller, args=(vimage_q, vdisplay_q, vrating_q, 0, birth_t,))
+  cpose_thread   = Thread(target=pose_detection_controller, args=(cimage_q, cdisplay_q, crating_q, 1, birth_t,))
   video_thread   = Thread(target=video_controller, args=(vimage_q, streamer, birth_t,))
+  rating_thread  = Thread(target=rating_controller, args=(vrating_q,crating_q, accuracy_q, birth_t))
   
   #start threads
   video_thread.start()
   camera_thread.start()
   vpose_thread.start()
   cpose_thread.start()
+  rating_thread.start()
 
-
-  print("Ready!")
 
   i=0
   lag=0
@@ -243,7 +277,7 @@ def main_func(video_file_name):
   while not stop_event.is_set():
     try:
       #wait for processed image
-
+      accuracies = accuracy_q.get()
       ts, voutput_overlay = vdisplay_q.get()
       print(f"[{time.perf_counter()-start_time:.4f}]: {ts} got voutput")
       coutput_overlay     = cdisplay_q.get()
@@ -279,6 +313,7 @@ def main_func(video_file_name):
         #mark displays as processed
         cdisplay_q.task_done()
         vdisplay_q.task_done()
+        accuracy_q.task_done()
       i+=1
 
     except KeyboardInterrupt:
@@ -297,6 +332,8 @@ def main_func(video_file_name):
   print("vpose_joined")
   cpose_thread.join()
   print("cpose joined")
+  rating_thread.join()
+  print("rating joined")
   
 
 

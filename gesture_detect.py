@@ -131,11 +131,22 @@ class PoseProfile:
       i += 1
 
 def compare_pose_profiles(p1, p2, accuracy):
-  point_accuracy  = 0
-  pointd_accuracy = 0
-  angle_accuracy  = 0
-  angled_accuracy = 0
-  return point_accuracy, pointd_accuracy, angle_accuracy, angled_accuracy
+  profile   = [[p1.points, p1.point_vels, p1.angles, p1.angle_vels],
+               [p2.points, p2.point_vels, p2.angles, p2.angle_vels]]
+  ratings = [0,0,0,0]
+
+  for r in range(len(ratings)):
+    #points
+    if r < 2:
+      all_count = len(point_dict)
+    else:
+      all_count = len(angle_dict)
+    ratings[r] = np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy) / all_count
+      
+    print(f"from {np.array((profile[0][r])-np.array(profile[1][r]))} under {accuracy} =  {np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy)}, and all = {all_count}")
+    
+  
+  return ratings
 
 
 #################################################
