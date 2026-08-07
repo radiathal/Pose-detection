@@ -18,6 +18,9 @@ from collections import deque
 from queue import Queue, Empty
 import gesture_detect
 
+#flip camera image vertically
+from PIL import Image
+
 
 target_fps = 10
 stop_event = Event()
@@ -162,6 +165,8 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
         image = data[1]
       else:
         image = image_q.get()
+        if type(image) != str:
+          image = cv2.flip(image, 1) #flip image from camera horisontally
 
       #if it's the end of the video, send STOP
       if type(image) == str:
