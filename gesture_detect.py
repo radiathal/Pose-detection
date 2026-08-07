@@ -131,7 +131,11 @@ class PoseProfile:
       i += 1
 
 def compare_pose_profiles(p1, p2, accuracy):
-  pass
+  point_accuracy  = 0
+  pointd_accuracy = 0
+  angle_accuracy  = 0
+  angled_accuracy = 0
+  return point_accuracy, pointd_accuracy, angle_accuracy, angled_accuracy
 
 
 #################################################

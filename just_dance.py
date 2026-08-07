@@ -19,7 +19,7 @@ from queue import Queue, Empty
 import gesture_detect
 
 
-target_fps = 15
+target_fps = 10
 stop_event = Event()
 start_event = Event()
 birth_t=0
@@ -129,8 +129,9 @@ def camera_controller(image_q, birth_t):
   cap = cv2.VideoCapture(0)
   interval = 1.0/target_fps
   next_t = time.perf_counter()
-
-  while cap.isOpened() and not stop_event.is_set() and start_event.is_set():  
+  while not start_event.is_set():
+    time.sleep(0.0001)
+  while cap.isOpened() and not stop_event.is_set():  
     s = time.perf_counter()
     cap.grab()
     #print(f"GRAB TIME = {time.perf_counter()-s:.4f}")
@@ -145,6 +146,7 @@ def camera_controller(image_q, birth_t):
         break
       image_q.put(frame)
      # print(f"[{time.time()-birth_t:.4f}]:  taken image") 
+  image_q.put("STOP")
   cap.release()
 
 
@@ -166,7 +168,7 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
         display_q.put(("STOP", "STOP"))
         break
 
-      #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
+      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
       
       # Run model inference. (detector index for different gesture detection instances)
       landmarks = gesture_detect.detect_pose(image,i,detector_index) 
@@ -175,12 +177,15 @@ def pose_detection_controller(image_q, display_q, pose_prof, detector_index, bir
 
       output_overlay = gesture_detect.draw_landmarks(image, landmarks)
 
-      #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
+      print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
 
       if detector_index == 0:
         display_q.put((ts, output_overlay))
       else:
         display_q.put(output_overlay)
+
+      #mark image as processed
+      image_q.task_done()
       
       i+=1
     except KeyboardInterrupt:
@@ -265,6 +270,10 @@ def main_func(video_file_name):
         print(f"[{time.perf_counter()-start_time:.4f}]: {ts} displayed c image")
         cv2.waitKey(1)
         lag = time.perf_counter() - lag_s
+
+        #mark displays as processed
+        cdisplay_q.task_done()
+        vdisplay_q.task_done()
       i+=1
 
     except KeyboardInterrupt:
@@ -279,10 +288,11 @@ def main_func(video_file_name):
   print("cam joined")
   video_thread.join()
   print("video joined")
-  cpose_thread.join()
-  print("cpose joined")
   vpose_thread.join()
   print("vpose_joined")
+  cpose_thread.join()
+  print("cpose joined")
+  
 
 
 
