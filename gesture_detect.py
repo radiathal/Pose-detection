@@ -81,10 +81,10 @@ ANGLE_MODE  = 2
 ANGLED_MODE = 3
 ALL_MODE    = 4
 
-POINT_ACC_DEFAULT  = 0.5
-POINTD_ACC_DEFAULT = 0.5
-ANGLE_ACC_DEFAULT  = 0.5
-ANGLED_ACC_DEFAULT = 0.5
+POINT_ACC_DEFAULT  = 0.08
+POINTD_ACC_DEFAULT = 0.002
+ANGLE_ACC_DEFAULT  = 0.35
+ANGLED_ACC_DEFAULT = 0.06
 DEFAULT_ACCS = [POINT_ACC_DEFAULT, POINTD_ACC_DEFAULT, ANGLE_ACC_DEFAULT, ANGLED_ACC_DEFAULT]
 
 POINT = 0
@@ -160,7 +160,7 @@ def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
         accuracy = [DEFAULT_ACCS[POINT_MODE]]
     case 1:
       profile = [[p1.point_vels],
-                 [p2.points_vels]]
+                 [p2.point_vels]]
       ratings = [0]
       types   = [POINT]
       if accuracy == DEFAULT_ACCS:
@@ -172,7 +172,7 @@ def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
       types   = [ANGLE]
       if accuracy == DEFAULT_ACCS:
         accuracy = [DEFAULT_ACCS[ANGLE_MODE]]
-    case 2:
+    case 3:
       profile = [[p1.angle_vels],
                  [p2.angle_vels]]
       ratings = [0]
@@ -188,12 +188,18 @@ def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
   for r in range(len(ratings)):
     if types[r] == POINT: #points
       all_count = len(point_dict)
-      ratings[r] = np.count_nonzero(abs(np.array((profile[0][r])-np.array(profile[1][r]))) < accuracy[r]) / (2 * all_count) #2 coordinates for each point
+      diffs = abs(np.array((profile[0][r])-np.array(profile[1][r])))
+      passes = 0
+      for diff in diffs:
+        passes +=  np.count_nonzero(diff < accuracy[r]) 
+        print(diff)
+      print(passes)
+      ratings[r] = passes / (2 * all_count) #2 coordinates for each point
     else:                 #angles
       all_count = len(angle_dict)
       ratings[r] = np.count_nonzero(abs(np.array((profile[0][r])-np.array(profile[1][r]))) < accuracy[r]) / all_count
       
-    print(f"from {abs(np.array((profile[0][r])-np.array(profile[1][r])))} under {accuracy} =  {np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy)}, and all = {all_count}")
+    #print(f"from {abs(np.array((profile[0][r])-np.array(profile[1][r])))} under {accuracy} =  {np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy)}, and all = {all_count}")
     
   
   return ratings

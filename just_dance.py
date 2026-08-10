@@ -27,6 +27,12 @@ stop_event = Event()
 start_event = Event()
 birth_t=0
 
+#just dance screen too big or small? change value.
+resize_window = 0.5
+
+accuracy_display_location = [(50,50), (50,50)]
+accuracy_display_width = 50
+
 
 
 class Streamer():
@@ -217,7 +223,7 @@ def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
         vpose_prof.update(vlandmarks)
         cpose_prof.update(clandmarks)
 
-        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, gesture_detect.ANGLE_MODE)
+        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, gesture_detect.ALL_MODE)
 
         accuracy_q.put(accuracies)
         print((f"[{time.time()-birth_t:.4f}]: {i} accs done"))
@@ -229,6 +235,29 @@ def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
     except KeyboardInterrupt:
       break
 
+#for testing only (?)
+def draw_accuracy(image, accuracies):
+  
+  i=0
+  #list
+  if type(accuracies) != int:
+    for acc in accuracies:
+      #greaner the closer accuracy is to 1
+      color = (0, int(acc*255), int((1-acc)*255))
+      cv2.line(image, (accuracy_display_location[0][0], accuracy_display_location[0][1]+accuracy_display_width*i), 
+                      (accuracy_display_location[1][0], accuracy_display_location[1][1]+accuracy_display_width*i), 
+                      color, 
+                      accuracy_display_width)
+      i+=1
+  #int
+  else: 
+    color = (0, int(accuracies*255), int((1-accuracies)*255))
+    cv2.line(image, accuracy_display_location[0], 
+                    accuracy_display_location[1], 
+                    color, 
+                    accuracy_display_width)
+  return image
+  
 
 #starts other threads and handles display
 def main_func(video_file_name):
@@ -303,7 +332,10 @@ def main_func(video_file_name):
         lag_s = time.perf_counter()
       
         #display
-        cv2.imshow("Just Dance", voutput_overlay)
+        resized = cv2.resize(voutput_overlay, None, fx = resize_window, fy = resize_window, interpolation = cv2.INTER_AREA)
+        if accuracies != None:
+          resized = draw_accuracy(resized, accuracies)
+        cv2.imshow("Just Dance", resized)
 
         cv2.imshow("Camera feed", coutput_overlay)
         print(f"[{time.perf_counter()-start_time:.4f}]: {ts} displayed c image")
