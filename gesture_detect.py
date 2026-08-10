@@ -74,6 +74,23 @@ angle_dict = {
     }
 
 
+# comparing points
+POINT_MODE  = 0
+POINTD_MODE = 1
+ANGLE_MODE  = 2
+ANGLED_MODE = 3
+ALL_MODE    = 4
+
+POINT_ACC_DEFAULT  = 0.5
+POINTD_ACC_DEFAULT = 0.5
+ANGLE_ACC_DEFAULT  = 0.5
+ANGLED_ACC_DEFAULT = 0.5
+DEFAULT_ACCS = [POINT_ACC_DEFAULT, POINTD_ACC_DEFAULT, ANGLE_ACC_DEFAULT, ANGLED_ACC_DEFAULT]
+
+POINT = 0
+ANGLE = 1
+
+
 ###############################################
 
 class PoseProfile:
@@ -130,20 +147,53 @@ class PoseProfile:
       print(f"{key}: {self.angles[i]}, speed: {self.angle_vels[i]}")
       i += 1
 
-def compare_pose_profiles(p1, p2, accuracy):
-  profile   = [[p1.points, p1.point_vels, p1.angles, p1.angle_vels],
-               [p2.points, p2.point_vels, p2.angles, p2.angle_vels]]
-  ratings = [0,0,0,0]
+def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
+  
+  # set up settings for comparison
+  match mode:
+    case 0:
+      profile = [[p1.points],
+                 [p2.points]]
+      ratings = [0]
+      types   = [POINT]
+      if accuracy == DEFAULT_ACCS:
+        accuracy = [DEFAULT_ACCS[POINT_MODE]]
+    case 1:
+      profile = [[p1.point_vels],
+                 [p2.points_vels]]
+      ratings = [0]
+      types   = [POINT]
+      if accuracy == DEFAULT_ACCS:
+        accuracy = [DEFAULT_ACCS[POINTD_MODE]]
+    case 2:
+      profile = [[p1.angles],
+                 [p2.angles]]
+      ratings = [0]
+      types   = [ANGLE]
+      if accuracy == DEFAULT_ACCS:
+        accuracy = [DEFAULT_ACCS[ANGLE_MODE]]
+    case 2:
+      profile = [[p1.angle_vels],
+                 [p2.angle_vels]]
+      ratings = [0]
+      types   = [ANGLE]
+      if accuracy == DEFAULT_ACCS:
+        accuracy = [DEFAULT_ACCS[ANGLED_MODE]]
+    case 4:
+      profile   = [[p1.points, p1.point_vels, p1.angles, p1.angle_vels],
+                   [p2.points, p2.point_vels, p2.angles, p2.angle_vels]]
+      ratings = [0,0,0,0]
+      types   = [POINT, POINT, ANGLE, ANGLE]
 
   for r in range(len(ratings)):
-    #points
-    if r < 2:
+    if types[r] == POINT: #points
       all_count = len(point_dict)
-    else:
+      ratings[r] = np.count_nonzero(abs(np.array((profile[0][r])-np.array(profile[1][r]))) < accuracy[r]) / (2 * all_count) #2 coordinates for each point
+    else:                 #angles
       all_count = len(angle_dict)
-    ratings[r] = np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy) / all_count
+      ratings[r] = np.count_nonzero(abs(np.array((profile[0][r])-np.array(profile[1][r]))) < accuracy[r]) / all_count
       
-    print(f"from {np.array((profile[0][r])-np.array(profile[1][r]))} under {accuracy} =  {np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy)}, and all = {all_count}")
+    print(f"from {abs(np.array((profile[0][r])-np.array(profile[1][r])))} under {accuracy} =  {np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy)}, and all = {all_count}")
     
   
   return ratings

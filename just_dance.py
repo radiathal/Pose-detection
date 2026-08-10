@@ -217,7 +217,7 @@ def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
         vpose_prof.update(vlandmarks)
         cpose_prof.update(clandmarks)
 
-        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, 0.5)
+        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, gesture_detect.ANGLE_MODE)
 
         accuracy_q.put(accuracies)
         print((f"[{time.time()-birth_t:.4f}]: {i} accs done"))
