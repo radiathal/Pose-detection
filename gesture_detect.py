@@ -5,6 +5,7 @@ import mediapipe as mp
 from mediapipe import tasks
 from mediapipe.tasks.python import vision
 import matplotlib.pyplot as plt
+from copy import deepcopy
 
 #setting up pose detection...
 BaseOptions = tasks.BaseOptions
@@ -146,6 +147,8 @@ class PoseProfile:
     for key in angle_dict.keys():
       print(f"{key}: {self.angles[i]}, speed: {self.angle_vels[i]}")
       i += 1
+  def copy(self):
+    return deepcopy(self)
 
 def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
   

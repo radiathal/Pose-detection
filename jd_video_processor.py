@@ -2,6 +2,8 @@ import gesture_detect
 from queue     import Queue
 from threading import Thread
 import av
+import pickle
+from pathlib import Path
 
 
 class Streamer():
@@ -56,9 +58,11 @@ def video_process(streamer, target_fps, frame_q):
   frame_q.put("STOP")
   streamer.container.close()
 
-def frame_pose_detect(pose_prof, frame_q): 
+def frame_pose_detect(pose_prof, frame_q, save_destination): 
   i=0
+  pose_prof_list = [0] #pose profiles always lag one frame. First pose profile does not exist.
   while True:
+    print(i)
     data = frame_q.get()
     if type(data) == str:
       break
@@ -66,25 +70,41 @@ def frame_pose_detect(pose_prof, frame_q):
     ts = data[1]
 
     # Run model inference. (detector index for different gesture detection instances)
-    landmarks = gesture_detect.detect_pose(image,i,detector_index) 
-    output_overlay = gesture_detect.draw_landmarks(image, landmarks)
-    # PUT DATA SOMEWHERE
+    landmarks = gesture_detect.detect_pose(image,i) 
+    if landmarks:
+      output_overlay = gesture_detect.draw_landmarks(image, landmarks)
+      # PUT DATA SOMEWHERE
 
-    pose_prof.update(landmarks)
-    #PUT DATA SOMEWHERE
+      pose_prof.update(landmarks)
+      pose_prof_list.append(pose_prof.copy())
+    else:
+      output_overlay = image
+      pose_prof_list.append(None)
       
     i+=1
+  with open(save_destination, "wb") as f:
+    print("saving...")
+    pickle.dump(pose_prof_list, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 
 if __name__ == "__main__":
-  target_fps = input("target fps: ")
-  video      = input("video filename: ")
+  target_fps = int(input("target fps: "))
+  video      = input("video filename: ") + ".mp4"
   streamer = Streamer(video) # MAKE EXCEPTION FOR ERROR
 
   pose_prof = gesture_detect.PoseProfile()
+  save_directory = Path("Dances") / "dsmn" 
+  save_directory.mkdir(parents=True, exist_ok=True)
 
+  pose_prof_save_file = save_directory / "data.pckl"
 
   frame_q = Queue()
   unpack_thread      = Thread(target=video_process, args=(streamer,target_fps, frame_q,))
-  pose_detect_thread = Thread(target=frame_pose_detect, args=(pose_prof, frame_q,))
+  pose_detect_thread = Thread(target=frame_pose_detect, args=(pose_prof, frame_q, pose_prof_save_file))
+
+  unpack_thread.start()
+  pose_detect_thread.start()
+
+  unpack_thread.join()
+  pose_detect_thread.join()
