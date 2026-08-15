@@ -21,17 +21,20 @@ import gesture_detect
 #flip camera image vertically
 from PIL import Image
 
-
+#configure fps
 target_fps = 10
-stop_event = Event()
-start_event = Event()
-birth_t=0
 
 #just dance screen too big or small? change value.
 resize_window = 0.5
 
+#where to display accuracy
 accuracy_display_location = [(50,50), (50,50)]
 accuracy_display_width = 50
+
+stop_event = Event()
+start_event = Event()
+birth_t=0
+
 
 
 
