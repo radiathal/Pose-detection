@@ -28,6 +28,8 @@ stop_event = Event()
 start_event = Event()
 birth_t=0
 
+rating_mode = gesture_detect.POINT_MODE
+
 #just dance screen too big or small? change value.
 resize_window = 0.5
 
@@ -254,7 +256,7 @@ def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
         vpose_prof.update(vlandmarks)
         cpose_prof.update(clandmarks)
 
-        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, gesture_detect.ALL_MODE)
+        accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, rating_mode)
 
         accuracy_q.put(accuracies)
         #print((f"[{time.time()-birth_t:.4f}]: {i} accs done"))

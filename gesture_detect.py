@@ -5,6 +5,7 @@ import mediapipe as mp
 from mediapipe import tasks
 from mediapipe.tasks.python import vision
 import matplotlib.pyplot as plt
+from math import sqrt
 
 #setting up pose detection...
 BaseOptions = tasks.BaseOptions
@@ -59,7 +60,7 @@ point_dict = {
         "knee_r"  : 26,
         "ankle_l" : 27,
         "ankle_r" : 28
-    }
+    } 
 angle_dict = {
         "shoulder_l" : (13, 11, 12),
         "shoulder_r" : (14, 12, 11),
@@ -73,6 +74,7 @@ angle_dict = {
         #"wrist_r" : (18, 16, 14)
     }
 
+RATED_POINTS = [3, 4, 5, 6, 7, 8, 11, 12, 13, 14] #indexes to PoseProfile.points
 
 # comparing points
 POINT_MODE  = 0
@@ -107,9 +109,15 @@ class PoseProfile:
   def update(self, landmarks):
     self.l_points = self.points.copy()
     self.points.clear()
+
+    #get new origin point
+    self.origin = [landmarks[point_dict["shoulder_r"]].x + (landmarks[point_dict["shoulder_l"]].x-landmarks[point_dict["shoulder_r"]].x)/2, 
+                   landmarks[point_dict["shoulder_l"]].y + (landmarks[point_dict["hip_l"]].y     -landmarks[point_dict["shoulder_l"]].y)/2]
+    print(f"ORIGIN = {self.origin}")
+
     #get new points
     for point in point_dict.values():
-      self.points.append([landmarks[point].x, landmarks[point].y])
+      self.points.append([landmarks[point].x-self.origin[0], landmarks[point].y-self.origin[1]])
 
     self.l_angles = self.angles.copy()
     self.angles.clear()
@@ -147,7 +155,7 @@ class PoseProfile:
       print(f"{key}: {self.angles[i]}, speed: {self.angle_vels[i]}")
       i += 1
 
-def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
+def compare_pose_profiles_old(p1, p2, mode, accuracy = DEFAULT_ACCS):
   
   # set up settings for comparison
   match mode:
@@ -201,6 +209,61 @@ def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
       
     #print(f"from {abs(np.array((profile[0][r])-np.array(profile[1][r])))} under {accuracy} =  {np.count_nonzero(np.array((profile[0][r])-np.array(profile[1][r])) < accuracy)}, and all = {all_count}")
     
+  
+  return ratings
+
+def compare_pose_profiles(p1, p2, mode):
+  match mode:
+    case 0:
+      profile = [[p1.points],
+                 [p2.points]]
+      ratings = [0]
+      types   = [POINT]
+    case 1:
+      profile = [[p1.point_vels],
+                 [p2.point_vels]]
+      ratings = [0]
+      types   = [POINT]
+    case 2:
+      profile = [[p1.angles],
+                 [p2.angles]]
+      ratings = [0]
+      types   = [ANGLE]
+      accuracy = [ANGLE_ACC_DEFAULT]
+    case 3:
+      profile = [[p1.angle_vels],
+                 [p2.angle_vels]]
+      ratings = [0]
+      types   = [ANGLE]
+      accuracy = [ANGLED_ACC_DEFAULT]
+    case 4:
+      profile   = [[p1.points, p1.point_vels, p1.angles, p1.angle_vels],
+                   [p2.points, p2.point_vels, p2.angles, p2.angle_vels]]
+      ratings = [0,0,0,0]
+      types   = [POINT, POINT, ANGLE, ANGLE]
+      accuracy = [POINT_ACC_DEFAULT, POINTD_ACC_DEFAULT, ANGLE_ACC_DEFAULT, ANGLED_ACC_DEFAULT]
+
+  for r in range(len(ratings)):
+    if types[r] == POINT: #points
+      all_count = len(RATED_POINTS)
+      gained = 0.0
+
+      for p in RATED_POINTS:
+        #vector one
+        v_len = sqrt(profile[0][r][p][0]**2+profile[0][r][p][1]**2)
+        v = [profile[0][r][p][0]/v_len, profile[0][r][p][1]/v_len]
+        #vector two
+        u_len = sqrt(profile[1][r][p][0]**2+profile[1][r][p][1]**2)
+        u = [profile[1][r][p][0]/u_len, profile[1][r][p][1]/u_len]
+        print(f"Gains: {v[0]}*{u[0]}+{v[1]}*{u[1]} = {v[0]*u[0]+v[1]*u[1]}")
+        gained += (v[0]*u[0]+v[1]*u[1])
+        print(f"Gained: {gained}")
+      
+      print(f"RATINGS : {gained}/{all_count} = {gained/all_count}")
+      ratings[r] = gained/all_count
+    else:                 #angles
+      all_count = len(angle_dict)
+      ratings[r] = np.count_nonzero(abs(np.array((profile[0][r])-np.array(profile[1][r]))) < accuracy[r]) / all_count
   
   return ratings
 
