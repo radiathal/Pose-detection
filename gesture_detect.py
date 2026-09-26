@@ -192,8 +192,8 @@ def compare_pose_profiles(p1, p2, mode, accuracy = DEFAULT_ACCS):
       passes = 0
       for diff in diffs:
         passes +=  np.count_nonzero(diff < accuracy[r]) 
-        print(diff)
-      print(passes)
+        #print(diff)
+      #print(passes)
       ratings[r] = passes / (2 * all_count) #2 coordinates for each point
     else:                 #angles
       all_count = len(angle_dict)

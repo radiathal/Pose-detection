@@ -15,14 +15,15 @@ from matplotlib.figure import Figure
 
 from threading import Thread, Event, Lock
 from collections import deque
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 import gesture_detect
 
 #flip camera image vertically
 from PIL import Image
 
 
-target_fps = 10
+target_fps = 10    #10 is reliable
+memory_seconds = 3 #how many seconds of future frames are stored in memory 
 stop_event = Event()
 start_event = Event()
 birth_t=0
@@ -44,12 +45,11 @@ class Streamer():
         buf += self.audio_buf.popleft()
       if len(buf) < needed:
         buf += b'\x00' * (needed-len(buf)) #add silence if no data to add
-        print("silence")
+        print("RAN OUT OF AUDIO DATA!")
       elif len(buf) > needed:
         leftover = bytes(buf[needed:])
         self.audio_buf.appendleft(leftover)
         buf = buf[:needed]
-        print("over")
     outdata[:] = bytes(buf)
 
   def __init__(self, video_file_name):
@@ -73,7 +73,7 @@ class Streamer():
       dtype='int16',
       callback=self.audio_callback,
       blocksize=2048,
-      latency="high",
+      latency="low",
     )
 
   def close(self):
@@ -91,7 +91,6 @@ def video_controller(image_q, streamer, birth_t):
   #only save select video frames according to target fps
   video_fps = float(streamer.video_stream.average_rate)
   frame_interval = video_fps / target_fps
-  print(frame_interval)
   frame = None
   next_frame_to_save = 0.0
   frame_idx = 0
@@ -116,7 +115,12 @@ def video_controller(image_q, streamer, birth_t):
             #print(f"[{time.time()-birth_t:.4f}]: {i} unpacking frame...")
             img = frame.to_ndarray(format="bgr24") 
             ts = float(frame.pts * streamer.video_stream.time_base)
-            image_q.put((ts, img))
+
+            #try putting frame into queue. If code is terminated, don't get stuck on q.put()
+            try:
+              image_q.put((ts, img), timeout=2)
+            except Full:
+              continue
 
             next_frame_to_save += frame_interval
             #print(f"[{time.time()-birth_t:.4f}]: {i} unpacked frame.")
@@ -129,7 +133,10 @@ def video_controller(image_q, streamer, birth_t):
       break
       
   #signals that it is the end
-  image_q.put(("STOP", "STOP"))
+  try:
+    image_q.put(("STOP", "STOP"), timeout=2)
+  except Full:
+    pass
   streamer.container.close()
   
 
@@ -155,7 +162,10 @@ def camera_controller(image_q, birth_t):
         break
       image_q.put(frame)
      # print(f"[{time.time()-birth_t:.4f}]:  taken image") 
-  image_q.put("STOP")
+  try:
+    image_q.put("STOP", timeout=2)
+  except Full:
+    pass
   cap.release()
 
 
@@ -175,9 +185,17 @@ def pose_detection_controller(image_q, display_q, rating_q, detector_index, birt
           image = cv2.flip(image, 1) #flip image from camera horisontally
 
       #if it's the end of the video, send STOP
+      if stop_event.is_set():
+        break
       if type(image) == str:
-        display_q.put(("STOP", "STOP"))
-        rating_q.put(None)
+        try:
+          display_q.put(("STOP", "STOP"), timeout=2)
+        except Full:
+          pass
+        try:
+          rating_q.put(None, timeout=2)
+        except Full:
+          pass
         break
 
       #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detecting image...")
@@ -194,9 +212,15 @@ def pose_detection_controller(image_q, display_q, rating_q, detector_index, birt
       #print(f"[{time.time()-birth_t:.4f}]: {i}.{detector_index} detected image")
 
       if detector_index == 0:
-        display_q.put((ts, output_overlay))
+        try:
+          display_q.put((ts, output_overlay), timeout=2)
+        except Full:
+          print("Display_queue is Full!!")
       else:
-        display_q.put(output_overlay)
+        try:
+          display_q.put(output_overlay, timeout=2)
+        except Full:
+          print("Display_queue is Full!!")
 
       #mark image as processed
       image_q.task_done()
@@ -216,19 +240,26 @@ def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
     time.sleep(0.0001)
   while not stop_event.is_set():
     try:
-      vlandmarks = vrating_q.get()
-      clandmarks = crating_q.get()
+      try:
+        vlandmarks = vrating_q.get(timeout=2)
+      except Empty:
+        continue
+      try:
+        clandmarks = crating_q.get(timeout=2)
+      except Empty:
+        continue
+
       if vlandmarks != None and clandmarks != None:
-        print((f"[{time.time()-birth_t:.4f}]: {i} accs..."))
+        #print((f"[{time.time()-birth_t:.4f}]: {i} accs..."))
         vpose_prof.update(vlandmarks)
         cpose_prof.update(clandmarks)
 
         accuracies = gesture_detect.compare_pose_profiles(vpose_prof, cpose_prof, gesture_detect.ALL_MODE)
 
         accuracy_q.put(accuracies)
-        print((f"[{time.time()-birth_t:.4f}]: {i} accs done"))
+        #print((f"[{time.time()-birth_t:.4f}]: {i} accs done"))
       else:
-        print("No LANDMARKS")
+        print("----------------No LANDMARKS!!!------------------")
         accuracy_q.put(None)
       i += 1
 
@@ -263,14 +294,15 @@ def draw_accuracy(image, accuracies):
 def main_func(video_file_name):
   display_delay = 0.000001
 
-  birth_t = time.time()
-  print((f"[{time.time()-birth_t:.4f}]: START"))
+  print(("[00.00]: START"))
+
+  saved_frames = target_fps * memory_seconds 
 
   #make queues
-  vdisplay_q = Queue()
-  cdisplay_q = Queue()
-  vimage_q = Queue()
-  cimage_q = Queue()
+  vdisplay_q = Queue(maxsize=saved_frames)
+  cdisplay_q = Queue(maxsize=saved_frames)
+  vimage_q = Queue(maxsize=saved_frames)
+  cimage_q = Queue(maxsize=saved_frames)
   audio_q  = Queue()
   vrating_q = Queue()
   crating_q = Queue()
@@ -300,7 +332,7 @@ def main_func(video_file_name):
   i=0
   lag=0
   #last_t = time.perf_counter()
-  start_time = time.perf_counter()
+  start_time = time.perf_counter() + streamer.stream.latency
   start_event.set()
   
   while not stop_event.is_set():
@@ -320,7 +352,7 @@ def main_func(video_file_name):
       if type(voutput_overlay) == str:
         stop_event.set()
         break
-      print(f"[{time.perf_counter()-start_time:.4f}]: {ts} got image.")
+      print(f"[{time.perf_counter()-start_time:.4f}]: {ts} got images.")
 
       #if display is late skip the frame
       if not time.perf_counter() - start_time - ts > 1/target_fps: 
@@ -338,7 +370,7 @@ def main_func(video_file_name):
         cv2.imshow("Just Dance", resized)
 
         cv2.imshow("Camera feed", coutput_overlay)
-        print(f"[{time.perf_counter()-start_time:.4f}]: {ts} displayed c image")
+        print(f"[{time.perf_counter()-start_time:.4f}]: {ts} displayed images")
         cv2.waitKey(1)
         lag = time.perf_counter() - lag_s
 
@@ -354,7 +386,7 @@ def main_func(video_file_name):
       streamer.close()
       start_event.clear()
       cv2.destroyAllWindows()
-      print((f"[{time.time()-birth_t:.4f}]: STOP"))
+      print((f"[{time.perf_counter()-start_time:.4f}]: STOP"))
       break
   camera_thread.join()
   print("cam joined")
