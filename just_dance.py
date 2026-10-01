@@ -28,13 +28,25 @@ stop_event = Event()
 start_event = Event()
 birth_t=0
 
+#rating
+DRAW_RATING_LIGHT_MODE = 0
+l_accuracy_display_location = [(50,50), (50,50)]
+l_accuracy_display_width = 50
+
+DRAW_RATING_BAR_MODE = 1
+b_accuracy_display_location = [(0,0), (0,80)]
+b_accuracy_display_width = 0
+
+
 rating_mode = gesture_detect.POINT_MODE
+draw_rating_mode = DRAW_RATING_BAR_MODE
+draw_rating_rate = 1 * target_fps #save rating every x frames
+
 
 #just dance screen too big or small? change value.
 resize_window = 0.5
 
-accuracy_display_location = [(50,50), (50,50)]
-accuracy_display_width = 50
+
 
 
 
@@ -269,28 +281,81 @@ def rating_controller(vrating_q, crating_q, accuracy_q, birth_t):
       break
 
 #for testing only (?)
-def draw_accuracy(image, accuracies):
+def draw_accuracy(image, accuracies, video_length, mode, ongoing = None):
   
-  i=0
-  #list
-  if type(accuracies) != int:
-    for acc in accuracies:
+  if mode == DRAW_RATING_LIGHT_MODE:
+    if accuracies != None:
+      i=0
+      #list
+      if type(accuracies) != int:
+        for acc in accuracies:
+          #greaner the closer accuracy is to 1
+          color = (0, int(acc*255), int((1-acc)*255))
+          cv2.line(image, (l_accuracy_display_location[0][0], l_accuracy_display_location[0][1]+l_accuracy_display_width*i), 
+                          (l_accuracy_display_location[1][0], l_accuracy_display_location[1][1]+l_accuracy_display_width*i), 
+                          color, 
+                        l_accuracy_display_width)
+          i+=1
+      #int
+      else: 
+        color = (0, int(accuracies*255), int((1-accuracies)*255))
+        cv2.line(image, l_accuracy_display_location[0], 
+                        l_accuracy_display_location[1], 
+                        color, 
+                        l_accuracy_display_width)
+  
+  elif mode == DRAW_RATING_BAR_MODE:
+    if ongoing:
+      b_accuracy_display_width = ongoing[0]
+      i = ongoing[1]
+      gained = ongoing[2]
+      all_accuracies = ongoing[3]
+      #print(all_accuracies)
+
+    if b_accuracy_display_width == 0:
+      b_accuracy_display_width = int((draw_rating_rate/video_length) * image.shape[1])
+      #print(f"{draw_rating_rate}/{video_length} * {image.shape[1]} = {b_accuracy_display_width}")
+
+    #draw back as black
+    color = (0, 0, 0)
+    cv2.line(image, (0,              int(b_accuracy_display_location[1][1]/2)), 
+                    (image.shape[1], int(b_accuracy_display_location[1][1]/2)), 
+                    color, 
+                    b_accuracy_display_location[1][1])
+
+
+    if i < draw_rating_rate:
+      if accuracies == None and all_accuracies != []:
+        accuracies = all_accuracies[-1]
+      elif type(accuracies) != int and accuracies != None:
+        accuracies = accuracies[0]
+      if accuracies != None:
+        gained += accuracies
+        #print(f"GAINED += {accuracies}")
+        i += 1
+    if i == draw_rating_rate:
+      all_accuracies.append(gained/i)
+      #print(f"ACCURACY = {gained}/{i} = {gained/(i)}")
+      gained = 0
+      i=0
+
+    j=0
+    for acc in all_accuracies:
       #greaner the closer accuracy is to 1
       color = (0, int(acc*255), int((1-acc)*255))
-      cv2.line(image, (accuracy_display_location[0][0], accuracy_display_location[0][1]+accuracy_display_width*i), 
-                      (accuracy_display_location[1][0], accuracy_display_location[1][1]+accuracy_display_width*i), 
+      cv2.line(image, (b_accuracy_display_location[0][0]+b_accuracy_display_width*j, b_accuracy_display_location[0][1]), 
+                      (b_accuracy_display_location[1][0]+b_accuracy_display_width*j, b_accuracy_display_location[1][1]), 
                       color, 
-                      accuracy_display_width)
-      i+=1
-  #int
-  else: 
-    color = (0, int(accuracies*255), int((1-accuracies)*255))
-    cv2.line(image, accuracy_display_location[0], 
-                    accuracy_display_location[1], 
-                    color, 
-                    accuracy_display_width)
-  return image
+                      b_accuracy_display_width)
+      j+=1
+    ongoing = [b_accuracy_display_width, i, gained, all_accuracies]
+
+    
+
+  return image, ongoing
   
+
+
 
 #starts other threads and handles display
 def main_func(video_file_name):
@@ -314,6 +379,7 @@ def main_func(video_file_name):
   
   # for audio unpacking from file
   streamer = Streamer(video_file_name)
+  video_length = float(streamer.video_stream.duration * streamer.video_stream.time_base * target_fps)
 
   
   #init threads for different processes
@@ -333,6 +399,7 @@ def main_func(video_file_name):
 
   i=0
   lag=0
+  ongoing = [b_accuracy_display_width, 0, 0, []]
   #last_t = time.perf_counter()
   start_time = time.perf_counter() + streamer.stream.latency
   start_event.set()
@@ -367,8 +434,7 @@ def main_func(video_file_name):
       
         #display
         resized = cv2.resize(voutput_overlay, None, fx = resize_window, fy = resize_window, interpolation = cv2.INTER_AREA)
-        if accuracies != None:
-          resized = draw_accuracy(resized, accuracies)
+        resized, ongoing = draw_accuracy(resized, accuracies, video_length, draw_rating_mode, ongoing)
         cv2.imshow("Just Dance", resized)
 
         cv2.imshow("Camera feed", coutput_overlay)

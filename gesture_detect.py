@@ -113,7 +113,7 @@ class PoseProfile:
     #get new origin point
     self.origin = [landmarks[point_dict["shoulder_r"]].x + (landmarks[point_dict["shoulder_l"]].x-landmarks[point_dict["shoulder_r"]].x)/2, 
                    landmarks[point_dict["shoulder_l"]].y + (landmarks[point_dict["hip_l"]].y     -landmarks[point_dict["shoulder_l"]].y)/2]
-    print(f"ORIGIN = {self.origin}")
+    #print(f"ORIGIN = {self.origin}")
 
     #get new points
     for point in point_dict.values():
@@ -255,9 +255,9 @@ def compare_pose_profiles(p1, p2, mode):
         #vector two
         u_len = sqrt(profile[1][r][p][0]**2+profile[1][r][p][1]**2)
         u = [profile[1][r][p][0]/u_len, profile[1][r][p][1]/u_len]
-        print(f"Gains: {v[0]}*{u[0]}+{v[1]}*{u[1]} = {v[0]*u[0]+v[1]*u[1]}")
+        #print(f"Gains: {v[0]}*{u[0]}+{v[1]}*{u[1]} = {v[0]*u[0]+v[1]*u[1]}")
         gained += (v[0]*u[0]+v[1]*u[1])
-        print(f"Gained: {gained}")
+        #print(f"Gained: {gained}")
       
       print(f"RATINGS : {gained}/{all_count} = {gained/all_count}")
       ratings[r] = gained/all_count
